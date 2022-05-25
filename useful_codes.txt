@@ -1,0 +1,146 @@
+SELECT *
+FROM [ent_v1].[ent_entity_address] ad
+WHERE ad.factset_entity_id IN 
+(SELECT factset_entity_id FROM [ent_v1].[ent_entity_coverage] cov WHERE cov.iso_country = 'SG')
+AND ad.factset_entity_id = '0KHMDK-E'
+--50,852
+
+
+SELECT *
+FROM [ref_v2].[ref_metadata_fields]
+WHERE table_name LIKE 'ff_advanced_%' AND field_name LIKE 'ff_loan_%'
+
+// Using wildcards pre-keywords _
+SELECT COUNT(*)
+FROM [ff_v3].[ff_advanced_saf] adv
+JOIN [ff_v3].[ff_sec_coverage] cov
+on cov.[fsym_id]=adv.[fsym_id]
+WHERE cov.[ff_gen_ind] in ('4') AND adv.[currency] LIKE '_CNY%'
+
+SELECT *
+--FROM [sym_v1].[sym_sec_entity] en
+--JOIN [sym_v1].[sym_coverage] cov
+--on cov.[fsym_id] = en.[fsym_id]
+--JOIN [sym_v1].[sym_perm_id_map] perm
+--on en.[fsym_id] = perm.[fsym_id]
+--WHERE perm.[fs_perm_sec_id] in ('000001-CN')
+
+//Listing to Company Level MV
+SELECT *
+FROM [ent_v1].[ent_entity_mkt_val] mv
+JOIN [sym_v1].[sym_sec_entity] en on en.[factset_entity_id]=mv.[factset_entity_id]
+JOIN [sym_v1].[sym_coverage] cov on cov.[fsym_primary_equity_id]=en.[fsym_id]
+WHERE cov.[fref_listing_exchange] IN ('SSC', 'SEC')
+
+
+// China Banks
+SELECT COUNT(*)
+FROM [ff_v3].[ff_advanced_saf] adv
+JOIN [ff_v3].[ff_sec_coverage] cov
+on cov.[fsym_id]=adv.[fsym_id]
+WHERE cov.[ff_gen_ind] in ('4') AND adv.[currency] = 'CNY'
+
+
+//DPS EPS consensus
+SELECT *
+FROM [sym_v1].[sym_ticker_region] tr
+JOIN [fe_v4].[fe_basic_conh_af] fe on fe.[fsym_id]= tr.[fsym_id]
+WHERE tr.[ticker_region] in ('AAPL-US') AND [fe_item] in ('DPS', 'EPS')
+ORDER BY [cons_start_date]
+
+//Entity to BBG id
+SELECT *
+FROM [sym_v1].[sym_bbg] bb
+JOIN [sym_v1].[sym_sec_entity] sec on bb.[fsym_id]=sec.[fsym_id]
+JOIN [sym_v1].[sym_entity] en on sec.[factset_entity_id]=en.[factset_entity_id]
+WHERE en.[factset_entity_id] in ('000BFT-E')
+
+
+//Entity Market Value
+//If they were to use DMS, they can get historical data back to only 2015 (31-Dec-2015) - ent_entity_mkt_val table in DMS
+select * from ent_v1.ent_entity_mkt_val where factset_entity_id = '0FPWZZ-E' and mv_date = '2020-09-30'
+
+//Ownership Market Value
+//If they want any data that is before 2015, they should use the Ownership query from Pramod’s email
+/*using ownership tables*/
+
+select x.price_date,x.entity_proper_name, sum(unadj_price * unadj_shares_outstanding) unadj_mcap, sum(adj_price * adj_shares_outstanding) as adj_mcap from (select e.*,op.*
+from sym_v1.sym_entity e
+join own_v5.own_sec_entity se on se.factset_entity_id = e.factset_entity_id
+join own_v5.own_sec_coverage oc on oc.fsym_id = se.fsym_id
+left join own_v5.own_sec_prices op on op.fsym_id = oc.fsym_id
+where e.factset_entity_id = '0FPWZZ-E' and op.price_date = (select MAX(price_date) from own_v5.own_sec_prices where fsym_id = op.fsym_id) and issue_type = 'EQ') x
+group by x.price_date, x.entity_proper_name
+
+// Group by year
+SELECT YEAR([date]) as Year, COUNT([fsym_id]) as Number
+FROM [ff_v3].[ff_advanced_af]
+WHERE [ff_mkt_val_secs] IS NOT NULL
+GROUP BY YEAR([date])
+ORDER BY Year ASC
+
+//Restatement Date - Proxy
+SELECT top 500 fsym_id, date, ff_source_bs_date, ff_source_cf_date, ff_source_is_date, ff_eps_rpt_date, ff_eps_basic FROM [ff_v3].[ff_basic_af] where date > '2018-01-01' order by fsym_id
+SELECT top 500 fsym_id, date, ff_source_bs_date, ff_source_cf_date, ff_source_is_date, ff_eps_rpt_date, ff_eps_basic FROM [ff_v3].[ff_basic_r_af] where date > '2018-01-01' order by fsym_id
+
+SELECT
+       *,
+       fgp_v1.fgp_SplitFactorPrice(fgp.fsym_id, fgp.price_date) AS split_adjustment_factor,
+       fgp_v1.fgp_SplitAdjPrice(fgp.fsym_id, fgp.price_date) AS split_adjusted_price, --Returns NULL
+       fgp_v1.fgp_SpinOffFactor(fgp.fsym_id, fgp.price_date) AS spinoff_adjustment_factor,
+       fgp_v1.fgp_SpinOffAdjPrice(fgp.fsym_id, fgp.price_date) AS spinoff_adjusted_price --Returns NULL
+FROM [fgp_v1].[fgp_global_prices] fgp
+WHERE fsym_id = 'BGZXQB-L';
+
+select * 
+from [ref_v2].[ref_calendar_holidays] 
+where [fref_exchange_code] in ('IND','BOM','NSE') and ([holiday_date] >='2021' and [holiday_date]<'2022')
+order by [fref_exchange_code] asc, [holiday_date] asc
+
+
+/*Adjusted Market Caps in USD for global securities*/
+SELECT * FROM(
+SELECT a.fsym_id
+,CASE
+    WHEN a.currency = 'USD' THEN a.adj_price_local * b.p_com_shs_out
+    ELSE adj_price_local * [ref_v2].[fx_rate] (a.currency, 'USD', a.p_date) * b.p_com_shs_out
+    END AS 'mkt_cap_usd'
+FROM
+    (
+    SELECT
+        fbp.fsym_id
+        ,fbp.p_date
+        ,fbp.currency
+        ,fp_v2.fp_spinoffadjprice(fbp.fsym_id, p_date) AS 'adj_price_local'
+    FROM [fp_v2].[fp_basic_prices] fbp
+    WHERE fbp.p_date = fp_v2.fp_prevpricedate(fbp.fsym_id, GETDATE())
+    ) a
+JOIN [fp_v2].[fp_basic_shares_current] b ON a.fsym_id = b.fsym_id
+) c
+WHERE c.mkt_cap_usd > 2000000   /*greater than $2 billion*/
+
+
+// select max price
+select fsym_id, price_date, currency, price from [fgp_v1].[fgp_global_prices] fgp
+where price_date=(select max(price_date) from [fgp_v1].[fgp_global_prices] where  fgp.fsym_id = fsym_id)
+
+
+//group by coverage for transcripts
+SELECT cm.iso_country, cm. country_desc, COUNT(DISTINCT se.factset_entity_id) AS entities
+FROM [evt_v1].[ce_participants] cp
+LEFT JOIN [sym_v1].[sym_entity] se ON cp.factset_entity_id = se.factset_entity_id
+LEFT JOIN [ref_v2].[country_map] cm ON se.iso_country = cm.iso_country
+WHERE cm.iso_country IS NOT NULL
+GROUP BY cm.iso_country, cm.country_desc
+ORDER BY entities DESC;
+
+
+//price coverage indian universe
+select pr.[price_date], 
+--cov.[fref_security_type],
+count(distinct cov.[fsym_id]) as Num_of_Securities
+from [fgp_v1].[fgp_sec_coverage] cov
+join [fgp_v1].[fgp_global_prices] pr on pr.fsym_id = cov.fsym_id
+where cov.[fref_exchange_code] in ('NSE','BOM') and pr.price is not null
+group by pr.[price_date]--, cov.[fref_security_type]
+order by pr.price_date desc
